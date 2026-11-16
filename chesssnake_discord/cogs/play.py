@@ -40,7 +40,7 @@ class ChallengeButton(
         return cls(match["action"], int(match["id"]))
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.chess_cog
+        cog = interaction.client.get_cog("ChessCog")
         try:
             await cog.answer_challenge(interaction, self.challenge_id, self.action)
         except Exception as exc:
@@ -147,8 +147,8 @@ class PlayCommands(Base):
         other = await render.mention(self.service, guild, other_id, other_name)
         colour = "" if c.color == "random" else f", they play {c.color}" if incoming else f", you play {c.color}"
         if incoming:
-            return f"• from {other}{colour} (`/chess accept` or `/chess decline`)"
-        return f"• to {other}{colour} (`/chess decline` to withdraw)"
+            return f"• from {other}{colour} ({self.cmd('accept')} or {self.cmd('decline')})"
+        return f"• to {other}{colour} ({self.cmd('decline')} to withdraw)"
 
     @app_commands.command(name="accept", description="Accept a challenge")
     @app_commands.describe(challenger="Who challenged you (needed if more than one person did)")
@@ -291,7 +291,7 @@ class PlayCommands(Base):
         state = await self.relay.own(game.id, self.service.draw(game, me, action))
         name = interaction.user.display_name
         text = {
-            "offer": f"**{name}** offers a draw. Answer with `/chess draw accept` or `/chess draw decline` "
+            "offer": f"**{name}** offers a draw. Answer with {self.cmd('draw accept')} or {self.cmd('draw decline')} "
             "(making a move declines it too).",
             "accept": f"**{name}** accepted the draw.",
             "decline": f"**{name}** declined the draw. Play on!",

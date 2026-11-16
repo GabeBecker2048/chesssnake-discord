@@ -1,6 +1,7 @@
 # chesssnake-discord
 
-A Discord chess bot that plays through a [chesssnake](https://gabebecker.com/chesssnake/) server.
+Chess for Discord, played through a [chesssnake](https://gabebecker.com/chesssnake/) server: a
+**cog you can add to your own bot**, or a **bot of its own** (one Docker compose file).
 The bot has no chess logic and keeps no games: chesssnake runs the rules and stores everything, and
 the bot acts for each player with an administrator token. Games played here also appear in the
 chesssnake web UI, and moves made there are posted back to Discord.
@@ -52,6 +53,69 @@ service and point `CHESSSNAKE__CLIENT__API_URL` at it.
 The images are tagged `0.1.0`, `0.1`, `0` and `latest`. The release's compose file pins the exact
 version; before 1.0, read the CHANGELOG before moving to a new minor version.
 
+## Adding it to your own bot
+
+The whole thing is one discord.py cog. Install it (Python 3.12+, discord.py 2.4+):
+
+```sh
+pip install chesssnake-discord
+```
+
+Then load it, usually in your bot's `setup_hook`:
+
+```python
+await bot.load_extension("chesssnake_discord")
+```
+
+It reads its settings from the environment (and `config.toml` if there is one), exactly as the
+standalone bot does, except that it needs no Discord token: set `CHESSSNAKE__CLIENT__API_URL` and
+`CHESSSNAKE__CLIENT__TOKEN` (an administrator's token on your chesssnake server). To pass the
+settings in code instead:
+
+```python
+from chesssnake_discord import load_config, make_cog
+
+config = load_config(require_discord_token=False)
+await bot.add_cog(make_cog(bot, config))
+```
+
+Things to know:
+
+- **Your bot syncs the commands.** The cog never calls `tree.sync()`; do it however your bot
+  already does. The commands are one group, `/chess`; set `command_name` (or
+  `CHESSSNAKE_DISCORD__DISCORD__COMMAND_NAME`) if your bot already has a `/chess`.
+- **The Server Members intent** is optional. Without it, making accounts for a whole server or for
+  new members is refused with an explanation, and boards show usernames instead of server
+  nicknames.
+- **Loading** checks that the chesssnake token is an administrator's, and fails with that reason
+  if not. Unloading closes everything the cog opened.
+- The cog keeps a small SQLite database of its own (`storage.path`, default
+  `chesssnake-discord.db` in the working directory).
+- Prefer not to install a package? Copy the `chesssnake_discord` folder into your bot and install
+  its dependencies (`discord.py`, `chesssnake[client]`, `python-dotenv`).
+
+## Settings
+
+Every setting has a default. Set one in `config.toml` (see `config.example.toml`) or as an
+environment variable, `CHESSSNAKE_DISCORD__{SECTION}__{KEY}`, which wins over the file.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `chesssnake.web_url` | the API url | The web UI's address, shown by `profile` and `password`. |
+| `live.mode` | `auto` | How moves made outside Discord are relayed: `auto`, `websocket`, `poll`, `off`. |
+| `live.poll_interval_seconds` | `15` | How often to poll, when polling. |
+| `discord.command_name` | `chess` | The slash command group. |
+| `discord.dev_guild_id` | `0` | The standalone bot registers its commands in this server only (instant). |
+| `discord.owner_ids` | none | Who may use the account commands of `admin`, besides the application's owner. |
+| `discord.max_guilds` | `0` | Leave servers beyond this many (`0`: no cap). |
+| `discord.bulk_accounts` | `true` | Whether managers may make accounts for everyone at once, and on join. |
+| `discord.notice` | empty | Posted when the bot joins a server and with every `init`. |
+| `storage.path` | `chesssnake-discord.db` | The bot's own small database. |
+
+`max_guilds`, `bulk_accounts = false` and `notice` are for running a bot that strangers can invite:
+a cap well under Discord's 100-server verification threshold, accounts only for people who ask,
+and a word about how long games are kept.
+
 ## Running it without Docker
 
 1. **A chesssnake administrator account for the bot.** On the chesssnake server:
@@ -67,16 +131,15 @@ version; before 1.0, read the CHANGELOG before moving to a new minor version.
    - Invite it with the scopes `bot` and `applications.commands`, and the permissions
      Send Messages, Attach Files and Embed Links.
 
-3. **Settings.** `cp .env.example .env` and fill it in. Every other setting has a default; change
-   one in `config.toml` (`cp config.example.toml config.toml`) or as an environment variable,
-   `CHESSSNAKE_DISCORD__{SECTION}__{KEY}`, which wins over the file. Set `dev_guild_id` while
-   developing, so commands register instantly in that server instead of globally.
+3. **Settings.** `cp .env.example .env` and fill it in; everything else is under
+   [Settings](#settings). Set `dev_guild_id` while developing, so commands register instantly in
+   that server instead of globally.
 
 4. **Run.**
 
    ```sh
-   uv sync
-   uv run chesssnake-discord          # or: uv run python -m chesssnake_discord
+   pip install chesssnake-discord
+   chesssnake-discord                 # reads .env from the current directory
    ```
 
    The bot checks at start-up that its chesssnake token belongs to an administrator.
@@ -169,5 +232,7 @@ Pull requests are squash-merged.
 2. Tag the merge commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 The release workflow checks the tag against `pyproject.toml` and the CHANGELOG, runs the tests,
-publishes the image for amd64 and arm64, then creates the GitHub release with the CHANGELOG
-section as its notes and a `compose.yaml` pinned to that version.
+builds the package and checks it installs cleanly, publishes it to PyPI (Trusted Publishing, no
+token) and the image for amd64 and arm64 to ghcr.io, then creates the GitHub release with the
+CHANGELOG section as its notes, the package, and a `compose.yaml` pinned to that version. PyPI
+never accepts a version number twice: a broken release is fixed by the next version.

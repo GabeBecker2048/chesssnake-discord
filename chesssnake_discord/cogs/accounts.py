@@ -42,7 +42,7 @@ class PasswordModal(_Modal, title="Set a password for the web UI"):
             raise BotError("The two passwords don't match.")
         await interaction.response.defer(ephemeral=True, thinking=True)
         user = await self.cog.service.set_first_password(interaction.user, self.password.value)
-        url = self.cog.bot.config.public_url
+        url = self.cog.config.public_url
         await interaction.followup.send(
             f"Done. Log in at {url} as `{user.username}` with that password.", ephemeral=True
         )
@@ -63,13 +63,14 @@ class AccountCommands(Base):
             user, _ = await self.service.create_for(interaction.user)
             await self.reply(
                 interaction,
-                f"Your chess account is `{user.username}`. Challenge someone with `/chess challenge`.\n"
-                "Use `/chess password` if you also want to play in the web UI.",
+                f"Your chess account is `{user.username}`. Challenge someone with {self.cmd('challenge')}.\n"
+                f"Use {self.cmd('password')} if you also want to play in the web UI." + self._notice(),
                 ephemeral=True,
             )
             return
 
         self.require_manager(interaction)
+        self._require_bulk()
         await self.defer(interaction, ephemeral=True)
         if not guild.chunked:
             await guild.chunk()
@@ -93,7 +94,22 @@ class AccountCommands(Base):
             lines.append("\n".join(created[:30]) + ("\n…" if len(created) > 30 else ""))
         if failed:
             lines.append(f"**{len(failed)}** failed:\n" + "\n".join(failed[:10]))
-        await self.reply(interaction, "\n".join(lines)[:1990], ephemeral=True)
+        notice = self._notice()
+        await self.reply(interaction, "\n".join(lines)[: 1990 - len(notice)] + notice, ephemeral=True)
+
+    def _notice(self) -> str:
+        """``[discord] notice``, as a paragraph to end a reply with, or nothing."""
+        return f"\n\n{self.config.discord.notice}" if self.config.discord.notice else ""
+
+    def _require_bulk(self):
+        """Making accounts for many members at once needs the setting and the intent."""
+        if not self.config.discord.bulk_accounts:
+            raise BotError(f"This bot doesn't make accounts in bulk: each member runs {self.cmd('init')} themselves.")
+        if not self.bot.intents.members:
+            raise BotError(
+                "This bot can't see the server's member list (its Server Members intent is off), "
+                f"so each member runs {self.cmd('init')} themselves."
+            )
 
     @app_commands.command(
         name="auto-init", description="Make chess accounts for new members as they join (Manage Server)"
@@ -101,13 +117,15 @@ class AccountCommands(Base):
     async def auto_init(self, interaction: discord.Interaction, setting: Literal["enable", "disable"]):
         guild = self.guild(interaction)
         self.require_manager(interaction)
+        if setting == "enable":
+            self._require_bulk()
         self.store.set_auto_init(guild.id, setting == "enable")
         state = "will now get" if setting == "enable" else "will no longer get"
         await self.reply(interaction, f"New members {state} a chess account when they join.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        if member.bot or not self.store.guild(member.guild.id).auto_init:
+        if member.bot or not self.config.discord.bulk_accounts or not self.store.guild(member.guild.id).auto_init:
             return
         try:
             user, made = await self.service.create_for(member)
@@ -135,7 +153,7 @@ class AccountCommands(Base):
         user = await self.service.unlink(interaction.user)
         await self.reply(
             interaction,
-            f"Unlinked from `{user.username}`. Use `/chess link` or `/chess init` to play again.",
+            f"Unlinked from `{user.username}`. Use {self.cmd('link')} or {self.cmd('init')} to play again.",
             ephemeral=True,
         )
 
@@ -150,11 +168,11 @@ class AccountCommands(Base):
     async def profile(self, interaction: discord.Interaction, member: discord.Member | None = None):
         member = member or interaction.user
         user = await self.service.require(member, you=member.id == interaction.user.id)
-        embed = discord.Embed(title=user.username, url=self.bot.config.public_url or None)
+        embed = discord.Embed(title=user.username, url=self.config.public_url or None)
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
         embed.add_field(name="chesssnake id", value=str(user.id))
         embed.add_field(name="Role", value=user.role)
-        embed.add_field(name="Web login", value="yes" if user.has_password else "no (`/chess password`)")
+        embed.add_field(name="Web login", value="yes" if user.has_password else f"no ({self.cmd('password')})")
         if user.disabled_at:
             embed.add_field(name="Disabled", value=user.disabled_at)
         await self.reply(interaction, embed=embed, ephemeral=True)

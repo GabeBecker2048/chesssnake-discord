@@ -1,10 +1,22 @@
 [project]
 name = "chesssnake-discord"
-version = "0.1.0"
-description = "A Discord chess bot that plays through a chesssnake server"
+version = "0.2.0"
+description = "Chess for Discord through a chesssnake server: a cog for your bot, or a bot of its own"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
+keywords = ["chess", "discord", "discord.py", "cog", "bot", "chesssnake"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+    "Topic :: Games/Entertainment :: Board Games",
+]
 dependencies = [
     "discord.py>=2.4",
     "chesssnake[client]>=0.15.4",

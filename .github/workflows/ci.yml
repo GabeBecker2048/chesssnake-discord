@@ -31,6 +31,14 @@ jobs:
         with:
           enable-cache: true
       - run: uv run pytest
+      - name: Build, and check the wheel is complete in a clean environment
+        run: |
+          set -euo pipefail
+          uv build
+          uv venv /tmp/wheel-check
+          uv pip install --python /tmp/wheel-check dist/*.whl
+          /tmp/wheel-check/bin/python -c "import chesssnake_discord as c; print(c.__version__); assert c.setup and c.make_cog and c.ChessCog"
+          /tmp/wheel-check/bin/chesssnake-discord 2>&1 | grep -q "Missing environment variable"
 
   # The image builds (not pushed): the release would otherwise be the first to find out.
   docker:

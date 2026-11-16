@@ -39,9 +39,11 @@ class Record:
 
 
 class ChessService:
-    def __init__(self, client: AsyncApiClient, *, provider: str = "discord"):
+    def __init__(self, client: AsyncApiClient, *, provider: str = "discord", command: str = "chess"):
         self.client = client
         self.provider = provider
+        #: The bot's slash command group, for messages that name a command.
+        self.command = command
         self._users: dict[int, tuple[float, User | None]] = {}
         self._discord_ids: dict[int, int | None] = {}
         #: The bot's own chesssnake user id, once :meth:`me` has run.
@@ -81,10 +83,12 @@ class ChessService:
         if user is None:
             if you:
                 raise BotError(
-                    "You don't have a chess account yet. Run `/chess init` to make one, "
-                    "or `/chess link` to use the one you already have."
+                    f"You don't have a chess account yet. Run `/{self.command} init` to make one, "
+                    f"or `/{self.command} link` to use the one you already have."
                 )
-            raise BotError(f"{person.name} doesn't have a chess account yet. They can make one with `/chess init`.")
+            raise BotError(
+                f"{person.name} doesn't have a chess account yet. They can make one with `/{self.command} init`."
+            )
         if user.disabled_at:
             raise BotError(f"The chess account `{user.username}` is disabled.")
         return user

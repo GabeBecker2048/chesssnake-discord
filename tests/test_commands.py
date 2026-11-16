@@ -11,9 +11,8 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from chesssnake_discord.bot import ChessCog
-from chesssnake_discord.config import Config, LiveSection
-from chesssnake_discord.live import LiveRelay
+from chesssnake_discord.cog import make_cog
+from chesssnake_discord.config import Config, DiscordSection, LiveSection
 from chesssnake_discord.store import Store
 
 from .conftest import GUILD
@@ -90,15 +89,21 @@ def player(id_, name):
     return FakeMember(id=id_, name=name, display_name=name, guild_permissions=SimpleNamespace(manage_guild=False))
 
 
+def fake_bot(members_intent=True):
+    return SimpleNamespace(is_owner=_never, intents=SimpleNamespace(members=members_intent), guilds=[])
+
+
+def build(service, *, members_intent=True, **discord_settings):
+    """The cog on a stand-in bot, its relay off, with some [discord] settings changed."""
+    config = Config(live=LiveSection(mode="off"), discord=DiscordSection(**discord_settings))
+    cog = make_cog(fake_bot(members_intent), config, service=service, store=Store())
+    alice, bob, mod = player(1, "alice"), player(2, "bob"), manager(3, "mod")
+    return cog, FakeGuild(alice, bob, mod), alice, bob, mod
+
+
 @pytest.fixture
 def setup(service):
-    store = Store()
-    relay = LiveRelay(service, store, LiveSection(mode="off"), None, lambda: {GUILD})
-    bot = SimpleNamespace(service=service, store=store, relay=relay, config=Config(), is_owner=_never)
-    cog = ChessCog(bot)
-    alice, bob, mod = player(1, "alice"), player(2, "bob"), manager(3, "mod")
-    guild = FakeGuild(alice, bob, mod)
-    return cog, guild, alice, bob, mod
+    return build(service)
 
 
 async def _never(_user):
@@ -230,3 +235,123 @@ async def test_a_chess_moderator_uses_the_game_commands(setup):
     assert "is now a chess moderator" in i.last
     i = await run(cog, "admin create-game", alice, guild, white=alice, black=bob)
     assert "started by alice" in i.last
+
+
+# --- the settings for bots that are not yours alone -------------------------------------
+
+
+async def test_a_renamed_command_group(service):
+    cog, guild, alice, bob, mod = build(service, command_name="xiangqi")
+    assert cog.__cog_app_commands_group__.name == "xiangqi"
+    i = await run(cog, "challenge", alice, guild, opponent=bob)
+    assert "`/xiangqi init`" in i.last  # messages name the command as it is here
+
+
+async def test_the_notice_comes_with_init(service):
+    cog, guild, alice, bob, mod = build(service, notice="Games on this demo are not kept.")
+    i = await run(cog, "init", alice, guild)
+    assert i.last.endswith("Games on this demo are not kept.")
+    i = await run(cog, "init", mod, guild, everyone=True)
+    assert i.last.endswith("Games on this demo are not kept.")
+
+
+async def test_bulk_accounts_can_be_turned_off(service):
+    cog, guild, alice, bob, mod = build(service, bulk_accounts=False)
+    i = await run(cog, "init", mod, guild, everyone=True)
+    assert "doesn't make accounts in bulk" in i.last
+    i = await run(cog, "auto-init", mod, guild, setting="enable")
+    assert "doesn't make accounts in bulk" in i.last
+    i = await run(cog, "auto-init", mod, guild, setting="disable")  # turning it off is always fine
+    assert "no longer" in i.last
+    i = await run(cog, "init", alice, guild)  # one's own account still works
+    assert "Your chess account is" in i.last
+
+
+async def test_without_the_members_intent(service):
+    cog, guild, alice, bob, mod = build(service, members_intent=False)
+    i = await run(cog, "init", mod, guild, everyone=True)
+    assert "Server Members intent is off" in i.last
+    i = await run(cog, "init", alice, guild)
+    assert "Your chess account is" in i.last
+
+
+class FakeChannel:
+    def __init__(self):
+        self.sent = []
+
+    def permissions_for(self, _member):
+        return SimpleNamespace(send_messages=True)
+
+    async def send(self, text):
+        self.sent.append(text)
+
+
+class JoinedGuild:
+    def __init__(self, id_):
+        self.id = id_
+        self.me = object()
+        self.system_channel = FakeChannel()
+        self.text_channels = []
+        self.left = False
+
+    async def leave(self):
+        self.left = True
+
+
+async def test_the_server_cap_and_the_join_notice(service):
+    cog, *_ = build(service, max_guilds=2, notice="Games here are not kept.")
+    first, second, third = JoinedGuild(1), JoinedGuild(2), JoinedGuild(3)
+    cog.bot.guilds = [first, second]
+    await cog.on_guild_join(second)
+    assert not second.left and second.system_channel.sent == ["Games here are not kept."]
+    cog.bot.guilds = [first, second, third]
+    await cog.on_guild_join(third)
+    assert third.left and "limited to 2 servers" in third.system_channel.sent[0]
+
+
+# --- loaded into a bot that is not ours ---------------------------------------------------
+
+
+async def test_load_extension_into_a_plain_bot(server, monkeypatch):
+    """The way someone adds chess to their own bot: no ChessBot, no login, no sync."""
+    import sys
+
+    from discord.ext import commands
+
+    # unload_extension drops the package's modules from sys.modules (that is how a
+    # reload works); put them back, so later tests and these share one set of classes.
+    modules = {name: module for name, module in sys.modules.items() if name.startswith("chesssnake_discord")}
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    monkeypatch.setenv("CHESSSNAKE__CLIENT__API_URL", server.url)
+    monkeypatch.setenv("CHESSSNAKE__CLIENT__TOKEN", server.token())
+    monkeypatch.setenv("CHESSSNAKE_DISCORD__DISCORD__COMMAND_NAME", "chessgame")
+    monkeypatch.setenv("CHESSSNAKE_DISCORD__STORAGE__PATH", ":memory:")
+    monkeypatch.delenv("DISCORD_TOKEN", raising=False)
+    monkeypatch.setenv("CHESSSNAKE_DISCORD_CONFIG", "/nonexistent/config.toml")
+
+    bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+    await bot.load_extension("chesssnake_discord")
+    cog = bot.get_cog("ChessCog")
+    assert cog is not None and bot.tree.get_command("chessgame") is not None
+    assert cog.service.bot_user_id == server.admin.id
+    await bot.unload_extension("chesssnake_discord")
+    assert bot.get_cog("ChessCog") is None and bot.tree.get_command("chessgame") is None
+    assert cog.service.client._http.is_closed
+
+
+async def test_loading_refuses_a_token_that_is_not_an_admins(server, service):
+    from discord.ext import commands
+
+    from chesssnake_discord import load_config
+
+    player_token = server.token(server.user("someone_" + __import__("secrets").token_hex(3)))
+    config = load_config(
+        env={"CHESSSNAKE__CLIENT__API_URL": server.url, "CHESSSNAKE__CLIENT__TOKEN": player_token},
+        path="/nonexistent/config.toml",
+        require_discord_token=False,
+    )
+    bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+    with pytest.raises(RuntimeError, match="not an administrator"):
+        await bot.add_cog(make_cog(bot, config, store=Store()))
