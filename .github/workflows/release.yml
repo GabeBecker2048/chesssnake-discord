@@ -59,7 +59,9 @@ jobs:
           uv venv /tmp/wheel-check
           uv pip install --python /tmp/wheel-check dist/*.whl
           /tmp/wheel-check/bin/python -c "import chesssnake_discord as c; print(c.__version__); assert c.setup and c.make_cog and c.ChessCog"
-          /tmp/wheel-check/bin/chesssnake-discord 2>&1 | grep -q "Missing environment variable"
+          # It exits 2 with no settings: that, and saying why, is the check.
+          out=$(/tmp/wheel-check/bin/chesssnake-discord 2>&1) && exit 1 || true
+          grep -q "Missing environment variable" <<<"$out"
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
