@@ -1,8 +1,12 @@
-# Pushing a tag vX.Y.Z publishes that version: the image to ghcr.io (amd64 and
-# arm64), then a GitHub release with that version's CHANGELOG entry as its notes
-# and a compose.yaml pinned to it. No secrets: the image is pushed with the
-# automatic GITHUB_TOKEN. The release is created last, so a release page never
-# exists for an image that was not published.
+# Pushing a tag vX.Y.Z publishes that version: the package to PyPI, the image to
+# ghcr.io (amd64 and arm64), then a GitHub release with that version's CHANGELOG
+# entry as its notes, the built package, and a compose.yaml pinned to it.
+#
+# No secrets. PyPI trusts this workflow through Trusted Publishing (OIDC): its
+# publisher is this repository, release.yml and the `pypi` environment, so
+# renaming any of them breaks uploads until PyPI's setting is changed too. The
+# image is pushed with the automatic GITHUB_TOKEN. The release is created last,
+# so a release page never exists for something that was not published.
 name: Release
 
 on:
@@ -48,12 +52,44 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
+      - name: Build, and check the wheel is complete in a clean environment
+        run: |
+          set -euo pipefail
+          uv build
+          uv venv /tmp/wheel-check
+          uv pip install --python /tmp/wheel-check dist/*.whl
+          /tmp/wheel-check/bin/python -c "import chesssnake_discord as c; print(c.__version__); assert c.setup and c.make_cog and c.ChessCog"
+          # It exits 2 with no settings: that, and saying why, is the check.
+          out=$(/tmp/wheel-check/bin/chesssnake-discord 2>&1) && exit 1 || true
+          grep -q "Missing environment variable" <<<"$out"
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
           path: |
             notes.md
             release-compose.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/chesssnake-discord/
+    permissions:
+      id-token: write # the OIDC token Trusted Publishing exchanges for an upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # No `skip-existing`: re-publishing a version already on PyPI should fail
+        # loudly, not succeed quietly. PyPI never accepts a version number twice.
 
   image:
     needs: check
@@ -94,7 +130,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   github-release:
-    needs: image
+    needs: [pypi, image]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -103,10 +139,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-files
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mv release-compose.yaml compose.yaml
-          gh release create "$GITHUB_REF_NAME" compose.yaml --repo "$GITHUB_REPOSITORY" \
+          gh release create "$GITHUB_REF_NAME" compose.yaml dist/* --repo "$GITHUB_REPOSITORY" \
             --title "chesssnake-discord ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag --latest

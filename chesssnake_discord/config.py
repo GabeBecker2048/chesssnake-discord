@@ -12,6 +12,7 @@ arguments.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -54,8 +55,20 @@ class LiveSection:
 
 @dataclass(frozen=True)
 class DiscordSection:
+    #: The slash command group: /chess by default. Change it if your bot already
+    #: has a /chess.
+    command_name: str = "chess"
     #: Nonzero: sync the commands to this one guild (instant, for development).
+    #: Only the standalone bot syncs; a bot that loads the cog syncs its own way.
     dev_guild_id: int = 0
+    #: Nonzero: leave any server joined beyond this many (saying why first).
+    max_guilds: int = 0
+    #: Whether server managers may make accounts for every member at once
+    #: (/chess init everyone) and for members as they join (auto-init).
+    bulk_accounts: bool = True
+    #: Posted when the bot joins a server and with every /chess init, e.g. that
+    #: games on this bot are not kept. Empty: nothing is posted.
+    notice: str = ""
     #: Discord user ids allowed to use the account commands of /chess admin, besides
     #: the application's owner(s).
     owner_ids: tuple = ()
@@ -117,6 +130,13 @@ def _section(name, cls, data):
 def _from_env(text: str, default):
     """An environment string as the type of a setting's default."""
     expected = type(default)
+    if expected is bool:
+        lowered = text.strip().lower()
+        if lowered in ("1", "true", "yes", "on"):
+            return True
+        if lowered in ("0", "false", "no", "off"):
+            return False
+        raise ConfigError(f"must be true or false, not {text!r}")
     try:
         if expected is tuple:
             return [int(part) for part in text.split(",") if part.strip()]
@@ -148,12 +168,14 @@ def _env_settings(env) -> dict:
     return data
 
 
-def load(path: str | os.PathLike | None = None, env=None) -> Config:
+def load(path: str | os.PathLike | None = None, env=None, *, require_discord_token: bool = True) -> Config:
     """
     Read the config file (if there is one), then the environment.
 
     :param path: The TOML file; default ``$CHESSSNAKE_DISCORD_CONFIG`` or ``./config.toml``.
         A missing file means every default.
+    :param require_discord_token: False when the cog is loaded into another bot,
+        which has its own token.
     :raises ConfigError: On a malformed file, an unknown key or variable, a bad
         value, or a missing token.
     """
@@ -179,6 +201,14 @@ def load(path: str | os.PathLike | None = None, env=None) -> Config:
         raise ConfigError(f"[live] mode must be one of {', '.join(LIVE_MODES)}, not {live.mode!r}")
     if live.poll_interval_seconds < 1:
         raise ConfigError("[live] poll_interval_seconds must be at least 1")
+    discord_section = sections["discord"]
+    if not re.fullmatch(r"[-_a-z0-9]{1,32}", discord_section.command_name):
+        raise ConfigError(
+            f"[discord] command_name must be 1 to 32 lowercase letters, digits, '-' or '_', "
+            f"not {discord_section.command_name!r}"
+        )
+    if discord_section.max_guilds < 0:
+        raise ConfigError("[discord] max_guilds must be 0 (no cap) or more")
 
     config = Config(
         **sections,
@@ -189,7 +219,7 @@ def load(path: str | os.PathLike | None = None, env=None) -> Config:
     missing = [
         name
         for name, value in (
-            (DISCORD_TOKEN_ENV, config.discord_token),
+            (DISCORD_TOKEN_ENV, config.discord_token if require_discord_token else "not needed"),
             (API_URL_ENV, config.api_url),
             (API_TOKEN_ENV, config.api_token),
         )

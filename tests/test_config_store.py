@@ -77,7 +77,7 @@ async def test_the_startup_check(server):
 
     assert await check_chesssnake(config(server.token())) is None
     assert "rejected" in await check_chesssnake(config("css_wrong"))
-    player = server.user("someone")
+    player = server.user("someone_" + __import__("secrets").token_hex(3))
     assert "not an administrator" in await check_chesssnake(config(server.token(player)))
     unreachable = Config(discord_token="x", api_url="http://127.0.0.1:9", api_token="css_x")
     assert "cannot reach" in await check_chesssnake(unreachable)

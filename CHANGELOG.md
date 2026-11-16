@@ -3,6 +3,21 @@
 All notable changes, newest first. Versions follow [semantic versioning](https://semver.org/);
 before 1.0, a minor version may break compatibility.
 
+## 0.2.0 - 2026-11-16
+
+### Added
+- Use it as a cog in your own bot: `pip install chesssnake-discord` (now on PyPI), then
+  `await bot.load_extension("chesssnake_discord")`. The standalone bot and the Docker image work
+  as before, built on the same cog.
+- `command_name` renames the `/chess` group, for bots that already have one.
+- `max_guilds` makes the bot leave servers beyond a cap, `bulk_accounts = false` turns off making
+  accounts for a whole server or on join, and `notice` is posted when the bot joins a server and
+  with every `init`: settings for running a bot that strangers can invite.
+
+### Changed
+- Without the Server Members intent, the cog now works with a warning: bulk account creation is
+  refused with an explanation, and boards show usernames rather than server nicknames.
+
 ## 0.1.0 - 2026-11-16
 
 ### Added

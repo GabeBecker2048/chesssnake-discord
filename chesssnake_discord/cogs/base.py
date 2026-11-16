@@ -11,23 +11,26 @@ from .. import render
 from ..errors import BotError
 
 if TYPE_CHECKING:
-    from ..bot import ChessBot
+    from discord.ext import commands
+
+    from ..chess import ChessService
+    from ..config import Config
+    from ..live import LiveRelay
+    from ..store import Store
 
 
 class Base:
-    bot: ChessBot
+    """Mixed into :class:`~chesssnake_discord.cog.ChessCog`, which sets these."""
 
-    @property
-    def service(self):
-        return self.bot.service
+    bot: commands.Bot
+    config: Config
+    service: ChessService
+    store: Store
+    relay: LiveRelay
 
-    @property
-    def store(self):
-        return self.bot.store
-
-    @property
-    def relay(self):
-        return self.bot.relay
+    def cmd(self, sub: str) -> str:
+        """A command as players type it, under this bot's command name: ``/chess init``."""
+        return f"`/{self.config.discord.command_name} {sub}`"
 
     # --- context ---------------------------------------------------------------
 
@@ -60,7 +63,7 @@ class Base:
     async def require_owner(self, interaction: discord.Interaction):
         """The bot's owners only: the application's owner(s) and ``[discord] owner_ids``.
         For actions on chesssnake accounts, which every server the bot is in shares."""
-        if interaction.user.id in self.bot.config.discord.owner_ids or await self.bot.is_owner(interaction.user):
+        if interaction.user.id in self.config.discord.owner_ids or await self.bot.is_owner(interaction.user):
             return
         raise BotError("Only the bot's owners can change chess accounts; they are shared by every server.")
 

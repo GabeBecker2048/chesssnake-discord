@@ -23,9 +23,20 @@ mode = "auto"
 poll_interval_seconds = 15
 
 [discord]
+# The slash command group. Change it if your bot already has a /chess.
+command_name = "chess"
 # Nonzero: register the commands in this one server only, instantly (for development).
-# Zero: register them globally, which can take a while to show up.
+# Zero: register them globally, which can take a while to show up. Only the
+# standalone bot registers commands; a bot that loads the cog does that itself.
 dev_guild_id = 0
+# Nonzero: leave any server joined beyond this many (with a message saying why).
+max_guilds = 0
+# Whether server managers may make accounts for every member at once
+# (init everyone) and for new members as they join (auto-init).
+bulk_accounts = true
+# Posted when the bot joins a server and with every init, for example that games
+# on this bot are not kept. Empty: nothing is posted.
+notice = ""
 # Discord user ids who may use the account commands of /chess admin (link,
 # unlink, disable, enable, rename), besides the bot application's owner.
 owner_ids = []

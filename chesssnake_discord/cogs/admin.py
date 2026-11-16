@@ -92,7 +92,7 @@ class AdminCommands(Base):
         if action == "add":
             text = (
                 f"`{user.username}` ({member.mention}) is now a chess moderator here: they can use the "
-                "`/chess admin` game commands, and manage this server's games through the chess server's API."
+                f"{self.cmd('admin')} game commands, and manage this server's games through the chess server's API."
             )
         else:
             text = f"`{user.username}` ({member.mention}) is no longer a chess moderator here."
