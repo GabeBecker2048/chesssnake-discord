@@ -1,0 +1,112 @@
+# Pushing a tag vX.Y.Z publishes that version: the image to ghcr.io (amd64 and
+# arm64), then a GitHub release with that version's CHANGELOG entry as its notes
+# and a compose.yaml pinned to it. No secrets: the image is pushed with the
+# automatic GITHUB_TOKEN. The release is created last, so a release page never
+# exists for an image that was not published.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that can say "no" happens here, before anything is published.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: The tag matches pyproject.toml, and CHANGELOG.md has an entry
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          grep -qE "^version = \"${version}\"$" pyproject.toml \
+            || { echo "::error::tag ${GITHUB_REF_NAME} does not match the version in pyproject.toml"; exit 1; }
+          awk -v v="$version" '
+            $0 ~ "^## " v "( |$)" {on=1; next}
+            on && /^## / {exit}
+            on {print}' CHANGELOG.md | sed -e '/./,$!d' > notes.md
+          test -s notes.md || { echo "::error::no '## ${version}' section in CHANGELOG.md"; exit 1; }
+          echo "Release notes:"; cat notes.md
+      - name: The compose file pins this minor version, and the release copy pins this exact one
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          minor="${version%.*}"
+          grep -q "chesssnake-discord:${minor}$" compose.yaml \
+            || { echo "::error::compose.yaml does not use the chesssnake-discord:${minor} image"; exit 1; }
+          sed "s|chesssnake-discord:${minor}$|chesssnake-discord:${version}|" compose.yaml > release-compose.yaml
+          grep -q "chesssnake-discord:${version}$" release-compose.yaml
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pytest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            notes.md
+            release-compose.yaml
+
+  image:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # arm64 is emulated, hence the long timeout: a Raspberry Pi is a normal place
+      # to run a bot like this.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/gabebecker2048/chesssnake-discord
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  github-release:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mv release-compose.yaml compose.yaml
+          gh release create "$GITHUB_REF_NAME" compose.yaml --repo "$GITHUB_REPOSITORY" \
+            --title "chesssnake-discord ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag --latest

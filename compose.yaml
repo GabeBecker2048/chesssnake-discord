@@ -1,0 +1,54 @@
+# chesssnake-discord and the chesssnake server it plays through, in one stack.
+# Both images are published: nothing is built.
+#
+#   1. Put this file in an empty folder, with a .env file holding DISCORD_TOKEN
+#      (see .env.example in the repository).
+#   2. docker compose up -d chesssnake
+#   3. docker compose exec chesssnake chesssnake user create discord-bot --admin --no-password
+#      docker compose exec chesssnake chesssnake user token discord-bot --name chesssnake-discord
+#      and put that token in .env as CHESSSNAKE__CLIENT__TOKEN.
+#   4. docker compose up -d
+#
+# More, including using a chesssnake server you already run:
+# https://github.com/GabeBecker2048/chesssnake-discord#running-it-with-docker
+
+name: chesssnake-discord
+
+services:
+  chesssnake:
+    # Pinned to 0.15.x: chesssnake is pre-1.0, so a new minor version may change
+    # the database (see its CHANGELOG before moving this).
+    image: ghcr.io/gabebecker2048/chesssnake:0.15
+    restart: unless-stopped
+    environment:
+      # Four slashes: an absolute path, on the volume.
+      CHESSSNAKE__DATABASE__URL: sqlite:////data/chesssnake.db
+      CHESSSNAKE__DATABASE__INIT_SCHEMA: "1"
+    ports:
+      # The web UI (where players make link codes) and the API. Put it behind a
+      # reverse proxy with HTTPS before letting people outside your network in.
+      - "8000:8000"
+    volumes:
+      - chesssnake-data:/data
+
+  bot:
+    image: ghcr.io/gabebecker2048/chesssnake-discord:0.1
+    restart: unless-stopped
+    depends_on:
+      chesssnake:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # The server above, over the stack's own network. This overrides the .env
+      # value, which is for running the bot outside Docker.
+      CHESSSNAKE__CLIENT__API_URL: http://chesssnake:8000
+      # The address players use for the web UI; set it to yours:
+      # CHESSSNAKE_DISCORD__CHESSSNAKE__WEB_URL: https://chess.example
+      # Every other setting works the same way: CHESSSNAKE_DISCORD__{SECTION}__{KEY},
+      # here or in .env (see .env.example).
+    volumes:
+      - bot-data:/data
+
+volumes:
+  chesssnake-data:
+  bot-data:

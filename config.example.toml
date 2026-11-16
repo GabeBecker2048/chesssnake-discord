@@ -1,0 +1,35 @@
+# chesssnake-discord settings. Copy to config.toml (or point $CHESSSNAKE_DISCORD_CONFIG at a file).
+# Every key is optional; the values below are the defaults.
+# Secrets do not go here: they are in .env (see .env.example).
+
+[chesssnake]
+# The web UI's address, shown by /chess profile and /chess password.
+# Empty: CHESSSNAKE__CLIENT__API_URL (the web UI is served by the same server).
+web_url = ""
+# The provider name Discord ids are linked under on the chesssnake server.
+provider = "discord"
+
+[live]
+# How moves made outside Discord (web UI, terminal) reach each server's channel
+# (set per server with /chess channel):
+#   auto      - websocket live updates (the bot follows every game), polling
+#               if the server has them off
+#   websocket - the same, but log a warning when it has to poll
+#   poll      - always poll
+#   off       - never relay
+mode = "auto"
+# How often to look for changes when polling (mode "poll", or while the
+# websocket is down).
+poll_interval_seconds = 15
+
+[discord]
+# Nonzero: register the commands in this one server only, instantly (for development).
+# Zero: register them globally, which can take a while to show up.
+dev_guild_id = 0
+# Discord user ids who may use the account commands of /chess admin (link,
+# unlink, disable, enable, rename), besides the bot application's owner.
+owner_ids = []
+
+[storage]
+# The bot's own small database: per-server settings and what has been posted.
+path = "chesssnake-discord.db"
